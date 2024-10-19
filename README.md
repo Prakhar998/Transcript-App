@@ -1,6 +1,6 @@
 # Real-Time Voice-to-Text Application
 
-# App deployed : https://transcript-app-sage.vercel.app/
+### App deployed : https://transcript-app-sage.vercel.app/
 
 This is a real-time voice-to-text web application built using the **Deepgram** API for voice recognition, **Next.js** as the React framework, and **Material-UI (MUI)** for the user interface components. The app allows users to convert their spoken words into written text in real time by leveraging the browser's microphone.
 
