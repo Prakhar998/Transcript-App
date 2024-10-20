@@ -11,6 +11,17 @@ This is a real-time voice-to-text web application built using the **Deepgram** A
 - **Real-time Transcript**: The transcript is displayed on the screen as the user speaks, with minimal delay.
 - **Stop Microphone**: Users can stop the voice input session and end the transcript.
 
+# OCR Image-to-Text Transcription App
+
+This web application uses Deepgram's SDK to convert speech from images into text. The app allows users to upload an image, and the extracted text is displayed in real-time.
+
+## Features
+
+- **Image Upload**: Users can upload an image containing text.
+- **Real-Time Text Transcription**: Uses Deepgram’s OCR capabilities to extract text from the uploaded image.
+- **User-Friendly Interface**: Simple and intuitive design built with Material-UI for easy user interaction.
+
+
 ## Technology Stack
 
 - **Next.js**: React-based framework for building server-side rendered and static web applications.
