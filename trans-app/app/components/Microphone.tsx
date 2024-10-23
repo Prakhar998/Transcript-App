@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useRef } from 'react';
 
 interface TranscriptionResult {
@@ -22,7 +24,7 @@ const Microphone: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
 
   // Replace this with your actual API key
-  const apiKey = 'cdc5c164be59de697de43ba49e197667d852f955';
+  const apiKey = 'your-deepgram-api-key';
 
   const logDebugInfo = (message: string): void => {
     setDebugInfo(prev => `${new Date().toISOString()}: ${message}\n${prev}`);
