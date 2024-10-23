@@ -1,152 +1,186 @@
-"use client";
+import React, { useState, useRef } from 'react';
 
-import React, { useState, useRef } from "react";
-import { Button, Typography, Container, Box } from "@mui/material";
+interface TranscriptionResult {
+  results?: {
+    channels?: Array<{
+      alternatives?: Array<{
+        transcript?: string;
+      }>;
+    }>;
+  };
+}
 
 const Microphone: React.FC = () => {
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [transcript, setTranscript] = useState<string>("");
+  const [transcript, setTranscript] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Hardcoded API key
-  const apiKey = "cdc5c164be59de697de43ba49e197667d852f955";  // Replace with your actual Deepgram API key
+  // Replace this with your actual API key
+  const apiKey = 'cdc5c164be59de697de43ba49e197667d852f955';
 
-  // Start recording audio
-  const startMicrophone = async () => {
+  const logDebugInfo = (message: string): void => {
+    setDebugInfo(prev => `${new Date().toISOString()}: ${message}\n${prev}`);
+    console.log(message);
+  };
+
+  const startMicrophone = async (): Promise<void> => {
     try {
-      // Reset state
       setError(null);
-      setTranscript("");
+      setTranscript('');
       setAudioChunks([]);
+      logDebugInfo('Requesting microphone access...');
 
-      // Get microphone stream
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      // Setup MediaRecorder
-      const recorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm", // Adjust MIME type if needed
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: 16000, // Optimal for speech recognition
+          channelCount: 1    // Mono audio
+        }
       });
-      mediaRecorderRef.current = recorder;
+      
+      streamRef.current = stream;
+      logDebugInfo('Microphone access granted');
 
-      // Collect audio data chunks
+      const recorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+        audioBitsPerSecond: 128000
+      });
+      
+      mediaRecorderRef.current = recorder;
+      logDebugInfo('MediaRecorder initialized');
+
       recorder.ondataavailable = (event: BlobEvent) => {
         if (event.data.size > 0) {
-          setAudioChunks((prevChunks) => [...prevChunks, event.data]);
+          setAudioChunks(prev => [...prev, event.data]);
+          logDebugInfo(`Received audio chunk: ${event.data.size} bytes`);
         }
       };
 
-      recorder.start(); // Start recording
+      recorder.start(1000); // Collect chunks every second
       setIsListening(true);
+      logDebugInfo('Recording started');
+      
     } catch (err) {
-      console.error("Error starting microphone:", err);
-      setError(`Failed to start microphone: ${(err as Error).message}`);
+      const errorMessage = `Microphone error: ${err instanceof Error ? err.message : String(err)}`;
+      logDebugInfo(errorMessage);
+      setError(errorMessage);
       stopMicrophone();
     }
   };
 
-  // Stop recording and upload audio for transcription
-  const stopMicrophone = async () => {
+  const stopMicrophone = async (): Promise<void> => {
     try {
-      // Stop the recorder
-      if (mediaRecorderRef.current) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        logDebugInfo('Stopping recording...');
         mediaRecorderRef.current.stop();
-      }
-
-      // Stop all audio tracks
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+        
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => {
+            track.stop();
+            logDebugInfo(`Stopped audio track: ${track.kind}`);
+          });
+        }
       }
 
       setIsListening(false);
-
-      // Process and upload audio
       await uploadAudioForTranscription();
-
+      
     } catch (err) {
-      console.error("Error stopping microphone:", err);
-      setError(`Failed to stop microphone: ${(err as Error).message}`);
+      const errorMessage = `Stop recording error: ${err instanceof Error ? err.message : String(err)}`;
+      logDebugInfo(errorMessage);
+      setError(errorMessage);
     }
   };
 
-  // Upload the recorded audio to the transcription service
-  const uploadAudioForTranscription = async () => {
-    try {
-      // Combine audio chunks into a single Blob
-      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+  const uploadAudioForTranscription = async (): Promise<void> => {
+    if (audioChunks.length === 0) {
+      logDebugInfo('No audio chunks to upload');
+      setError('No audio recorded');
+      return;
+    }
 
-      // Upload audio to transcription API
-      const response = await fetch("https://api.deepgram.com/v1/listen", {
-        method: "POST",
+    setIsUploading(true);
+    try {
+      logDebugInfo('Preparing audio for upload...');
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+      logDebugInfo(`Audio blob size: ${audioBlob.size} bytes`);
+
+      if (!apiKey) {
+        throw new Error('Deepgram API key not found');
+      }
+
+      const response = await fetch('https://api.deepgram.com/v1/listen', {
+        method: 'POST',
         headers: {
-          Authorization: `Token ${apiKey}`, // Hardcoded API key
-          "Content-Type": "audio/webm", // MIME type of the audio data
+          'Authorization': `Token ${apiKey}`,
+          'Content-Type': 'audio/webm',
         },
-        body: audioBlob, // Send the combined audio blob
+        body: audioBlob,
       });
 
       if (!response.ok) {
-        throw new Error("Failed to upload audio for transcription");
+        const errorText = await response.text();
+        throw new Error(`API Error (${response.status}): ${errorText}`);
       }
 
-      const result = await response.json();
+      const result = await response.json() as TranscriptionResult;
+      logDebugInfo('Transcription received');
 
-      const transcriptData = result.channel?.alternatives[0]?.transcript;
-
-      if (transcriptData) {
-        setTranscript(transcriptData); // Set the final transcript
+      if (result?.results?.channels?.[0]?.alternatives?.[0]?.transcript) {
+        const transcriptText = result.results.channels[0].alternatives[0].transcript;
+        setTranscript(transcriptText);
+        logDebugInfo('Transcript updated successfully');
       } else {
-        setTranscript("No transcript available.");
+        throw new Error('Invalid response format from Deepgram');
       }
 
-    } catch (error) {
-      console.error("Error uploading audio:", error);
-      setError("Failed to upload audio for transcription.");
+    } catch (err) {
+      const errorMessage = `Transcription error: ${err instanceof Error ? err.message : String(err)}`;
+      logDebugInfo(errorMessage);
+      setError(errorMessage);
+    } finally {
+      setIsUploading(false);
     }
   };
 
   return (
-    <Container maxWidth="md">
-      <Box sx={{ py: 4 }}>
-        <Typography variant="h5" gutterBottom>
-          Batch Voice to Text Transcription
-        </Typography>
+    <div className="w-full max-w-3xl mx-auto p-4">
+      <h2 className="text-2xl font-bold mb-4">Voice to Text Transcription</h2>
 
-        <Button
-          variant="contained"
-          color={isListening ? "error" : "primary"}
-          onClick={isListening ? stopMicrophone : startMicrophone}
-          sx={{ mb: 3 }}
-        >
-          {isListening ? "Stop Recording" : "Start Recording"}
-        </Button>
+      <button
+        className={`px-4 py-2 rounded-md mb-4 ${
+          isListening 
+            ? 'bg-red-500 hover:bg-red-600' 
+            : 'bg-blue-500 hover:bg-blue-600'
+        } text-white disabled:opacity-50`}
+        onClick={isListening ? stopMicrophone : startMicrophone}
+        disabled={isUploading}
+      >
+        {isUploading ? 'Processing...' : isListening ? 'Stop Recording' : 'Start Recording'}
+      </button>
 
-        {error && (
-          <Typography color="error" sx={{ mb: 2 }}>
-            {error}
-          </Typography>
-        )}
+      {error && (
+        <div className="p-4 mb-4 text-red-700 bg-red-100 border-l-4 border-red-500 rounded">
+          {error}
+        </div>
+      )}
 
-        <Box
-          sx={{
-            p: 2,
-            bgcolor: "grey.50",
-            borderRadius: 1,
-            minHeight: 100,
-            maxHeight: 400,
-            overflow: "auto",
-          }}
-        >
-          <Typography variant="body1">
-            {transcript || "Your transcript will appear here after uploading..."}
-          </Typography>
-        </Box>
-      </Box>
-    </Container>
+      <div className="bg-gray-50 p-4 rounded-md min-h-[100px] max-h-[400px] overflow-auto mb-4">
+        {transcript || 'Your transcript will appear here after recording...'}
+      </div>
+
+      <details className="mt-4">
+        <summary className="cursor-pointer text-sm text-gray-600">Debug Information</summary>
+        <pre className="mt-2 p-2 bg-gray-100 rounded-md text-xs whitespace-pre-wrap">
+          {debugInfo}
+        </pre>
+      </details>
+    </div>
   );
 };
 
