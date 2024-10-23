@@ -1,110 +1,111 @@
 "use client";
 
+import React, { useState, useRef } from "react";
+import { Button, Typography, Container, Box } from "@mui/material";
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Button, Typography, Container, Box } from '@mui/material';
-import { createClient } from "@deepgram/sdk"; // Import Deepgram SDK
-
-interface MicrophoneProps {
-  apiKey: string;
-}
-
-const Microphone: React.FC<MicrophoneProps> = ({ apiKey }) => {
+const Microphone: React.FC = () => {
   const [isListening, setIsListening] = useState<boolean>(false);
-  const [transcript, setTranscript] = useState<string>('');
+  const [transcript, setTranscript] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const deepgramClientRef = useRef<ReturnType<typeof createClient> | null>(null);
-  const deepgramLiveRef = useRef<WebSocket | null>(null); // Use WebSocket type for live transcription
 
-  useEffect(() => {
-    // Initialize Deepgram client
-    deepgramClientRef.current = createClient(apiKey);
+  // Hardcoded API key
+  const apiKey = "cdc5c164be59de697de43ba49e197667d852f955";  // Replace with your actual Deepgram API key
 
-    // Cleanup function
-    return () => {
-      stopMicrophone();
-    };
-  }, [apiKey]);
-
+  // Start recording audio
   const startMicrophone = async () => {
     try {
-      // Reset states
+      // Reset state
       setError(null);
-      setTranscript('');
+      setTranscript("");
+      setAudioChunks([]);
 
       // Get microphone stream
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Initialize Deepgram Live Transcription via WebSocket
-      const deepgramSocketUrl = `wss://api.deepgram.com/v1/listen?access_token=${apiKey}`;
-      deepgramLiveRef.current = new WebSocket(deepgramSocketUrl);
-
-      deepgramLiveRef.current.onopen = () => {
-        console.log('Deepgram connection opened');
-      };
-
-      deepgramLiveRef.current.onmessage = (event: MessageEvent) => {
-        const data = JSON.parse(event.data);
-        const transcriptData = data.channel?.alternatives[0]?.transcript;
-        if (transcriptData) {
-          setTranscript((prev) => prev + (prev ? ' ' : '') + transcriptData);
-        }
-      };
-
-      deepgramLiveRef.current.onerror = (event: Event) => {
-        console.error('Deepgram WebSocket error:', event);
-        setError('Transcription error occurred. Please try again.');
-      };
-
-      deepgramLiveRef.current.onclose = () => {
-        console.log('Deepgram connection closed');
-      };
-
       // Setup MediaRecorder
-      const recorder = new MediaRecorder(stream);
+      const recorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm", // Adjust MIME type if needed
+      });
       mediaRecorderRef.current = recorder;
 
-      recorder.addEventListener('dataavailable', (event) => {
-        if (event.data.size > 0 && deepgramLiveRef.current && deepgramLiveRef.current.readyState === WebSocket.OPEN) {
-          deepgramLiveRef.current.send(event.data); // Send audio data to Deepgram
+      // Collect audio data chunks
+      recorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data.size > 0) {
+          setAudioChunks((prevChunks) => [...prevChunks, event.data]);
         }
-      });
+      };
 
-      recorder.start(250); // Send data every 250ms
+      recorder.start(); // Start recording
       setIsListening(true);
-
     } catch (err) {
-      console.error('Error starting microphone:', err);
+      console.error("Error starting microphone:", err);
       setError(`Failed to start microphone: ${(err as Error).message}`);
       stopMicrophone();
     }
   };
 
-  const stopMicrophone = () => {
+  // Stop recording and upload audio for transcription
+  const stopMicrophone = async () => {
     try {
+      // Stop the recorder
       if (mediaRecorderRef.current) {
         mediaRecorderRef.current.stop();
-        mediaRecorderRef.current = null;
       }
 
+      // Stop all audio tracks
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-        streamRef.current = null;
-      }
-
-      if (deepgramLiveRef.current) {
-        deepgramLiveRef.current.close();
-        deepgramLiveRef.current = null;
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
 
       setIsListening(false);
+
+      // Process and upload audio
+      await uploadAudioForTranscription();
+
     } catch (err) {
-      console.error('Error stopping microphone:', err);
+      console.error("Error stopping microphone:", err);
       setError(`Failed to stop microphone: ${(err as Error).message}`);
+    }
+  };
+
+  // Upload the recorded audio to the transcription service
+  const uploadAudioForTranscription = async () => {
+    try {
+      // Combine audio chunks into a single Blob
+      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+
+      // Upload audio to transcription API
+      const response = await fetch("https://api.deepgram.com/v1/listen", {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${apiKey}`, // Hardcoded API key
+          "Content-Type": "audio/webm", // MIME type of the audio data
+        },
+        body: audioBlob, // Send the combined audio blob
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to upload audio for transcription");
+      }
+
+      const result = await response.json();
+
+      const transcriptData = result.channel?.alternatives[0]?.transcript;
+
+      if (transcriptData) {
+        setTranscript(transcriptData); // Set the final transcript
+      } else {
+        setTranscript("No transcript available.");
+      }
+
+    } catch (error) {
+      console.error("Error uploading audio:", error);
+      setError("Failed to upload audio for transcription.");
     }
   };
 
@@ -112,39 +113,36 @@ const Microphone: React.FC<MicrophoneProps> = ({ apiKey }) => {
     <Container maxWidth="md">
       <Box sx={{ py: 4 }}>
         <Typography variant="h5" gutterBottom>
-          Real-Time Voice to Text
+          Batch Voice to Text Transcription
         </Typography>
 
         <Button
           variant="contained"
-          color={isListening ? 'error' : 'primary'}
+          color={isListening ? "error" : "primary"}
           onClick={isListening ? stopMicrophone : startMicrophone}
           sx={{ mb: 3 }}
         >
-          {isListening ? 'Stop Microphone' : 'Start Microphone'}
+          {isListening ? "Stop Recording" : "Start Recording"}
         </Button>
 
         {error && (
-          <Typography 
-            color="error" 
-            sx={{ mb: 2 }}
-          >
+          <Typography color="error" sx={{ mb: 2 }}>
             {error}
           </Typography>
         )}
 
-        <Box 
-          sx={{ 
-            p: 2, 
-            bgcolor: 'grey.50', 
+        <Box
+          sx={{
+            p: 2,
+            bgcolor: "grey.50",
             borderRadius: 1,
             minHeight: 100,
             maxHeight: 400,
-            overflow: 'auto'
+            overflow: "auto",
           }}
         >
           <Typography variant="body1">
-            {transcript || 'Your transcript will appear here...'}
+            {transcript || "Your transcript will appear here after uploading..."}
           </Typography>
         </Box>
       </Box>

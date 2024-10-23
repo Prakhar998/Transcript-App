@@ -6,7 +6,7 @@ import ImageToText from './components/ImageToText';
 const Page: React.FC = () => {
   return (
     <div>
-      <Microphone apiKey={'67fff0dc0adde559f75d91b207fdef7d125dce81'} />
+      <Microphone />
       <ImageToText />
     </div>
   );
