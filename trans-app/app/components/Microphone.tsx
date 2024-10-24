@@ -24,7 +24,7 @@ const Microphone: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
 
   // Replace this with your actual API key
-  const apiKey = 'your-deepgram-api-key';
+  const apiKey = 'cdc5c164be59de697de43ba49e197667d852f955';
 
   const logDebugInfo = (message: string): void => {
     setDebugInfo(prev => `${new Date().toISOString()}: ${message}\n${prev}`);
